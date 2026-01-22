@@ -161,7 +161,127 @@ Detailed patterns and code examples for each optimization category:
 ## Detection Tools
 
 - **BenchmarkDotNet** — `[MemoryDiagnoser]` for allocation measurement
-- **Rider/ReSharper** — Highlights closures, boxing, unsealed classes
+- **dotnet-trace** — CPU sampling and thread time profiling (see below)
 - **dotnet-counters** — Runtime GC pressure monitoring
+- **Rider/ReSharper** — Highlights closures, boxing, unsealed classes
 - **PerfView** — Detailed allocation and GC analysis
 - **Heap Allocation Analyzer** — Roslyn analyzer for compile-time detection
+
+---
+
+## Using dotnet-trace for CPU Profiling
+
+### Installation
+
+```bash
+dotnet tool install -g dotnet-trace
+```
+
+### Available Profiles
+
+```bash
+dotnet-trace list-profiles
+```
+
+| Profile | Use Case | Platform |
+|---------|----------|----------|
+| `dotnet-sampled-thread-time` | Wall clock time analysis | All |
+| `cpu-sampling` | CPU usage measurement | Linux only |
+| `gc-collect` | GC collection tracking (low overhead) | All |
+| `gc-verbose` | GC + allocation sampling | All |
+
+### Tracing a Process
+
+#### Option 1: Launch and trace (recommended for benchmarks)
+
+```bash
+# Build first (important!)
+dotnet build -c Release --framework net9.0
+
+# Trace the built executable directly
+dotnet-trace collect \
+  --profile dotnet-sampled-thread-time \
+  -o trace_output.nettrace \
+  -- ./bin/Release/net9.0/YourApp [args]
+```
+
+**Important:** Don't use `dotnet run` through `dotnet-trace` — argument parsing issues occur. Always build first and trace the executable directly.
+
+#### Option 2: Attach to running process
+
+```bash
+# Find process ID
+dotnet-trace ps
+
+# Attach with duration limit
+dotnet-trace collect -p <PID> --duration 00:00:30
+```
+
+### Converting Traces for Visualization
+
+```bash
+# Convert to speedscope format (viewable in browser)
+dotnet-trace convert trace_output.nettrace --format speedscope
+
+# View at https://www.speedscope.app/
+```
+
+### Tracing BenchmarkDotNet
+
+BenchmarkDotNet's `--job dry` has significant overhead (internal compilation). For profiling:
+
+```bash
+# Build the benchmark project
+cd path/to/Benchmarks
+dotnet build -c Release --framework net9.0
+
+# Run with trace (may take several minutes)
+dotnet-trace collect \
+  --profile dotnet-sampled-thread-time \
+  -o benchmark_trace.nettrace \
+  -- ./bin/Release/net9.0/YourBenchmarks \
+  --filter "*MethodName*" \
+  --job dry
+
+# Convert for viewing
+dotnet-trace convert benchmark_trace.nettrace --format speedscope
+```
+
+**Tips:**
+- Use `--filter` to limit which benchmarks run
+- `--job dry` runs minimal iterations but still has compile overhead
+- `--job short` runs more iterations but faster overall
+- Trace files can be large (10-50MB+ for complex runs)
+
+### Quick Reference
+
+```bash
+# Install
+dotnet tool install -g dotnet-trace
+
+# List running .NET processes
+dotnet-trace ps
+
+# Trace with 30-second duration
+dotnet-trace collect -p <PID> --duration 00:00:30
+
+# Trace with specific providers
+dotnet-trace collect -p <PID> --providers Microsoft-DotNETCore-SampleProfiler
+
+# Convert to speedscope
+dotnet-trace convert trace.nettrace --format speedscope
+
+# Convert to chromium format (for Chrome DevTools)
+dotnet-trace convert trace.nettrace --format chromium
+```
+
+### Interpreting Results in Speedscope
+
+1. **Left Heavy view** — Shows call tree sorted by total time (find hottest paths)
+2. **Sandwich view** — Shows callers and callees of selected function
+3. **Time Order view** — Shows execution timeline (find phases)
+
+Look for:
+- Functions with high "self time" (CPU-bound work)
+- Deep call stacks with high "total time" (algorithmic issues)
+- Frequent short calls (consider inlining or batching)
