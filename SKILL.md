@@ -131,6 +131,7 @@ Detailed patterns and code examples for each optimization category:
 - **[references/async-and-threading.md](references/async-and-threading.md)** — ValueTask, ConfigureAwait, lock selection
 - **[references/jit-optimization.md](references/jit-optimization.md)** — Inlining, throw helpers, bounds check elimination, SIMD
 - **[references/reflection-avoidance.md](references/reflection-avoidance.md)** — Caching, compiled delegates, source generators
+- **[references/advanced-patterns.md](references/advanced-patterns.md)** — Decision flowcharts, multi-level buffer pools, circular buffers, batch processing, benchmarking, anti-patterns
 
 ## Checklists
 
