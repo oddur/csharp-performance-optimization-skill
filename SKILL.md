@@ -226,32 +226,75 @@ dotnet-trace convert trace_output.nettrace --format speedscope
 # View at https://www.speedscope.app/
 ```
 
-### Tracing BenchmarkDotNet
+### Profiling Hot Paths (Recommended Approach)
 
-BenchmarkDotNet's `--job dry` has significant overhead (internal compilation). For profiling:
+**Do NOT trace BenchmarkDotNet directly** — it has massive startup overhead (assembly compilation, reflection, job scheduling) that dominates the trace. You'll capture BenchmarkDotNet infrastructure instead of your actual code.
 
-```bash
-# Build the benchmark project
-cd path/to/Benchmarks
-dotnet build -c Release --framework net9.0
+**Instead, create a standalone profiling harness:**
 
-# Run with trace (may take several minutes)
-dotnet-trace collect \
-  --profile dotnet-sampled-thread-time \
-  -o benchmark_trace.nettrace \
-  -- ./bin/Release/net9.0/YourBenchmarks \
-  --filter "*MethodName*" \
-  --job dry
+```csharp
+// Program.cs - minimal console app that directly exercises hot path
+using System.Diagnostics;
 
-# Convert for viewing
-dotnet-trace convert benchmark_trace.nettrace --format speedscope
+int iterations = args.Length > 0 ? int.Parse(args[0]) : 100;
+int batchSize = args.Length > 1 ? int.Parse(args[1]) : 5000;
+
+// Setup (mirrors your benchmark setup)
+var myService = new MyService();
+
+// Warmup - JIT everything first
+for (int i = 0; i < 10; i++)
+{
+    myService.HotPathMethod();
+}
+
+Console.WriteLine("Starting profiled run...");
+var sw = Stopwatch.StartNew();
+
+// The actual code you want to profile
+for (int iter = 0; iter < iterations; iter++)
+{
+    for (int i = 0; i < batchSize; i++)
+    {
+        myService.HotPathMethod();
+    }
+}
+
+sw.Stop();
+Console.WriteLine($"Completed {iterations * batchSize:N0} ops in {sw.Elapsed.TotalSeconds:F2}s");
 ```
 
-**Tips:**
-- Use `--filter` to limit which benchmarks run
-- `--job dry` runs minimal iterations but still has compile overhead
-- `--job short` runs more iterations but faster overall
-- Trace files can be large (10-50MB+ for complex runs)
+**Then trace it:**
+
+```bash
+# Build the profiler
+dotnet build -c Release
+
+# Trace with dotnet-trace
+dotnet-trace collect \
+  --profile dotnet-sampled-thread-time \
+  -o profile.nettrace \
+  -- ./bin/Release/net9.0/MyProfiler 100 5000
+
+# Convert and view
+dotnet-trace convert profile.nettrace --format speedscope
+# Open at https://www.speedscope.app/
+```
+
+**Why this works better:**
+- No BenchmarkDotNet overhead (compilation, reflection, scheduling)
+- Trace captures only your code
+- Fast iteration — run in seconds, not minutes
+- Easy to adjust parameters for longer/shorter traces
+
+### BenchmarkDotNet: Use for Measurement, Not Profiling
+
+BenchmarkDotNet is excellent for **measuring** performance (ops/sec, allocations) but poor for **profiling** (finding hot spots). Use both tools together:
+
+| Tool | Use For |
+|------|---------|
+| BenchmarkDotNet | Reliable measurements, before/after comparison |
+| Standalone profiler + dotnet-trace | Finding where CPU time is spent |
 
 ### Quick Reference
 
